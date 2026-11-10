@@ -1,0 +1,897 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#0e1411">
+<title>Pip Hunt</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+/* Layout: full-bleed camera canvas, thin HUD strips top/bottom, bottom sheets for menus. Single dark look (it sits on a live camera feed). */
+:root{
+  --panel: rgba(12,18,15,.86);
+  --panel-line: rgba(255,255,255,.12);
+  --ink: #edf2ec;
+  --ink-dim: #a9b5ab;
+  --scarf: #ff8a3d;      /* Pip's scarf: the accent */
+  --hood: #36a86a;       /* Pip's hood: secondary */
+  --bad: #ff5a5a;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:#0e1411;color:var(--ink);font:15px/1.45 var(--display);overflow:hidden;
+  -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;touch-action:none}
+[hidden]{display:none!important}
+#view{position:fixed;inset:0;width:100%;height:100%;display:block}
+#cam{position:fixed;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none}
+
+.hud{position:fixed;left:0;right:0;top:0;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;
+  padding:calc(env(safe-area-inset-top,0px) + 10px) max(16px,env(safe-area-inset-right,0px)) 0 max(16px,env(safe-area-inset-left,0px));pointer-events:none}
+.chip{background:var(--panel);border:1px solid var(--panel-line);border-radius:12px;padding:6px 12px;min-width:76px;backdrop-filter:blur(6px)}
+.chip small{display:block;font:500 10px/1.2 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim)}
+.chip b{font:700 22px/1.15 var(--mono);font-variant-numeric:tabular-nums}
+.chip.time{text-align:center}
+.chip.time b{font-size:30px}
+.chip.time.low b{color:var(--scarf)}
+.chip.right{text-align:right}
+
+.still{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 14px);width:min(280px,70vw);
+  display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--panel-line);border-radius:999px;padding:6px 12px;pointer-events:none}
+.still span{font:500 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim);white-space:nowrap}
+.still .bar{flex:1;height:6px;border-radius:3px;background:rgba(255,255,255,.12);overflow:hidden}
+.still .bar i{display:block;height:100%;width:0;background:var(--hood);transition:background .2s}
+.still.warn .bar i{background:var(--bad)}
+
+.hint{position:fixed;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top,0px) + 14px);width:min(360px,calc(100vw - 32px));
+  text-align:center;background:var(--panel);border:1px solid var(--panel-line);border-radius:14px;padding:10px 14px;pointer-events:none}
+.hint strong{display:block;font-weight:800;font-size:17px}
+.hint span{color:var(--ink-dim);font-size:13px}
+.hint button{pointer-events:auto;margin-top:8px}
+
+#count{position:fixed;inset:0;display:grid;place-items:center;font:800 120px/1 var(--display);color:var(--ink);
+  text-shadow:0 4px 30px rgba(0,0,0,.6);pointer-events:none}
+
+.sheet{position:fixed;left:0;right:0;bottom:0;max-height:92%;overflow:auto;background:var(--panel);border-top:1px solid var(--panel-line);
+  border-radius:22px 22px 0 0;backdrop-filter:blur(10px);
+  padding:22px max(16px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 22px) max(16px,env(safe-area-inset-left,0px));touch-action:pan-y}
+.sheet-inner{max-width:460px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+.brand{display:flex;align-items:center;gap:14px}
+.brand canvas{width:64px;height:64px;flex:none}
+h1{font:800 40px/1 var(--display);letter-spacing:-.02em;margin:0;text-wrap:balance}
+h1 em{font-style:normal;color:var(--scarf)}
+h2{font:800 28px/1.05 var(--display);margin:0;text-wrap:balance}
+.lede{margin:0;color:var(--ink-dim)}
+.rules{margin:0;padding:0;list-style:none;display:grid;gap:8px}
+.rules li{display:grid;grid-template-columns:28px 1fr;gap:8px;align-items:start}
+.rules li i{font:700 12px/22px var(--mono);font-style:normal;color:var(--scarf);text-align:center;border:1px solid rgba(255,138,61,.4);border-radius:6px}
+.btns{display:flex;flex-wrap:wrap;gap:10px}
+button{font:800 16px/1 var(--display);border:0;border-radius:14px;padding:15px 18px;cursor:pointer;color:#1a0f06;background:var(--scarf);flex:1 1 160px}
+button.ghost{background:transparent;color:var(--ink);border:1px solid var(--panel-line)}
+button.small{flex:none;padding:9px 12px;font-size:13px;border-radius:10px}
+button:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
+.note{font-size:12.5px;color:var(--ink-dim);margin:0}
+.note.warn{color:var(--scarf)}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stats div{border:1px solid var(--panel-line);border-radius:12px;padding:10px}
+.stats small{display:block;font:500 10px/1.2 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-dim)}
+.stats b{font:700 24px/1.2 var(--mono);font-variant-numeric:tabular-nums}
+.reason{font:700 12px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--hood)}
+.reason.dq{color:var(--bad)}
+details{border-top:1px solid var(--panel-line);padding-top:10px}
+summary{cursor:pointer;color:var(--ink-dim);font-size:13px}
+.tune{display:grid;gap:10px;margin-top:10px}
+.tune label{display:grid;gap:4px;font-size:13px;color:var(--ink-dim)}
+.tune output{font-family:var(--mono);color:var(--ink)}
+input[type=range]{width:100%;accent-color:var(--scarf)}
+select{font:500 14px var(--display);background:#18211c;color:var(--ink);border:1px solid var(--panel-line);border-radius:8px;padding:8px}
+#rotate{position:fixed;inset:0;display:grid;place-items:center;background:#0e1411;text-align:center;padding:24px;font:800 22px/1.3 var(--display)}
+@media (prefers-reduced-motion: reduce){ .still .bar i{transition:none} }
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<video id="cam" playsinline muted autoplay></video>
+
+<div class="hud" id="hud" hidden>
+  <div class="chip"><small>Score</small><b id="hScore">0</b></div>
+  <div class="chip time" id="hTimeChip"><small>Time</small><b id="hTime">60</b></div>
+  <div class="chip right"><small>Found</small><b id="hHits">0</b></div>
+</div>
+
+<div class="hint" id="hint" hidden>
+  <strong id="hintTitle">Scan the room</strong>
+  <span id="hintText">Hold your phone upright and turn slowly in a full circle.</span>
+  <div><button class="small ghost" id="btnEarly" hidden>Start with what I have</button></div>
+</div>
+
+<div class="still" id="still" hidden><span>Stay put</span><div class="bar"><i id="stillBar"></i></div></div>
+<div id="count" hidden></div>
+
+<section class="sheet" id="intro">
+  <div class="sheet-inner">
+    <div class="brand"><canvas id="logo" width="128" height="128"></canvas><h1>Pip <em>Hunt</em></h1></div>
+    <p class="lede">Pip is a tiny, very shy gnome who hides behind window frames, door edges and curtains in the room around you. Tap him before the clock runs out.</p>
+    <ul class="rules">
+      <li><i>1</i><span>Stand in one spot. Hold the phone upright and turn a full circle so Pip can learn the room.</span></li>
+      <li><i>2</i><span>Look around and tap Pip when you spot him peeking out. Every catch scores, and fast catches score more.</span></li>
+      <li><i>3</i><span>Miss, and he gets scared and runs to a new spot. Walk away from your spot and you are disqualified.</span></li>
+    </ul>
+    <div class="btns">
+      <button id="btnCam">Start with camera</button>
+      <button class="ghost" id="btnDemo">Try the demo room</button>
+    </div>
+    <p class="note warn" id="secureNote" hidden>The camera only works when this page is opened over https. Use the demo room here, or host the file (see the note that came with it).</p>
+    <p class="note" id="errNote" hidden></p>
+    <details>
+      <summary>Tuning</summary>
+      <div class="tune">
+        <label for="fov">Camera field of view (long side) <output id="fovOut">64°</output>
+          <input type="range" id="fov" min="50" max="85" step="1" value="64"></label>
+        <label for="strict">Stay-put strictness
+          <select id="strict"><option value="0">Relaxed</option><option value="1" selected>Normal</option><option value="2">Strict</option></select></label>
+        <label for="secs">Round length
+          <select id="secs"><option value="45">45 seconds</option><option value="60" selected>60 seconds</option><option value="90">90 seconds</option></select></label>
+      </div>
+    </details>
+  </div>
+</section>
+
+<section class="sheet" id="ready" hidden>
+  <div class="sheet-inner">
+    <h2 id="readyTitle">Room learned</h2>
+    <p class="lede" id="readyText">Pip found some hiding spots.</p>
+    <div class="btns"><button id="btnGo">Start round</button><button class="ghost" id="btnRescan">Scan again</button></div>
+  </div>
+</section>
+
+<section class="sheet" id="over" hidden>
+  <div class="sheet-inner">
+    <div class="reason" id="overReason">Time's up</div>
+    <h2 id="overTitle">You caught Pip 0 times</h2>
+    <div class="stats">
+      <div><small>Score</small><b id="oScore">0</b></div>
+      <div><small>Accuracy</small><b id="oAcc">–</b></div>
+      <div><small>Best</small><b id="oBest">0</b></div>
+    </div>
+    <p class="note" id="overNote"></p>
+    <div class="btns"><button id="btnAgain">Play again</button><button class="ghost" id="btnMenu">Menu</button></div>
+  </div>
+</section>
+
+<div id="rotate" hidden>Turn your phone upright<br>(portrait) to keep playing</div>
+
+<script>
+'use strict';
+/* ============================================================
+   Pip Hunt — single-file mobile AR hide-and-seek
+   Camera + gyroscope (DeviceOrientation) give a 360° view;
+   edge analysis finds frames/corners to hide behind; template
+   tracking keeps Pip glued to his spot; accelerometer watches
+   for walking.
+   ============================================================ */
+const TAU = Math.PI * 2, D2R = Math.PI / 180;
+const SECT = 24;           // scan sectors (15° each)
+const PROC_LONG = 240;     // long side of the analysis frame, px
+const TS = 24, TH = 12;    // template size / half
+const PXR = 512;           // demo room: pixels per radian
+const $ = s => document.querySelector(s);
+
+const settings = { fov: 64, strict: 1, secs: 60 };
+try { Object.assign(settings, JSON.parse(localStorage.getItem('piphunt.settings') || '{}')); } catch (e) {}
+let best = 0; try { best = +localStorage.getItem('piphunt.best') || 0; } catch (e) {}
+function saveSettings() { try { localStorage.setItem('piphunt.settings', JSON.stringify(settings)); } catch (e) {} }
+
+/* ---------- canvas ---------- */
+const cv = $('#view'), ctx = cv.getContext('2d');
+const proc = document.createElement('canvas');
+const pctx = proc.getContext('2d', { willReadFrequently: true });
+let Wd = 0, Hd = 0, DPR = 1;
+function resize() {
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  Wd = window.innerWidth; Hd = window.innerHeight;
+  cv.width = Math.round(Wd * DPR); cv.height = Math.round(Hd * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  if (src.kind === 'demo') sizeDemoFrame();
+}
+
+/* ---------- orientation math ---------- */
+// W3C device orientation → rotation matrix (device frame → earth frame), row-major
+function rotMat(a, b, g) {
+  const x = b * D2R, y = g * D2R, z = a * D2R;
+  const cX = Math.cos(x), cY = Math.cos(y), cZ = Math.cos(z), sX = Math.sin(x), sY = Math.sin(y), sZ = Math.sin(z);
+  return [
+    cZ * cY - sZ * sX * sY, -cX * sZ, cY * sZ * sX + cZ * sY,
+    cY * sZ + cZ * sX * sY,  cZ * cX, sZ * sY - cZ * cY * sX,
+    -cX * sY,                sX,      cX * cY
+  ];
+}
+const mulR  = (R, v) => [R[0]*v[0]+R[1]*v[1]+R[2]*v[2], R[3]*v[0]+R[4]*v[1]+R[5]*v[2], R[6]*v[0]+R[7]*v[1]+R[8]*v[2]];
+const mulRT = (R, d) => [R[0]*d[0]+R[3]*d[1]+R[6]*d[2], R[1]*d[0]+R[4]*d[1]+R[7]*d[2], R[2]*d[0]+R[5]*d[1]+R[8]*d[2]];
+const norm3 = v => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0]/l, v[1]/l, v[2]/l]; };
+const dot3 = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+
+const ori = { R: rotMat(0, 90, 0), have: false };
+window.addEventListener('deviceorientation', e => {
+  if (src.kind !== 'camera' || e.alpha == null) return;
+  ori.R = rotMat(e.alpha, e.beta, e.gamma); ori.have = true;
+});
+function pose() {
+  const R = ori.R;
+  const fw = [-R[2], -R[5], -R[8]];          // back-camera direction
+  const xa = [R[0], R[3], R[6]];             // screen-right in world
+  return { fw, heading: Math.atan2(fw[0], fw[1]), pitch: Math.asin(Math.max(-1, Math.min(1, fw[2]))), roll: Math.asin(Math.max(-1, Math.min(1, xa[2]))) };
+}
+
+/* ---------- motion (stay-put) ---------- */
+const motion = { ema: 0, meter: 0, grav: null, have: false, sim: 0 };
+window.addEventListener('devicemotion', e => {
+  if (src.kind !== 'camera') return;
+  let mx, my, mz;
+  const a = e.acceleration;
+  if (a && a.x != null) { mx = a.x; my = a.y; mz = a.z; }
+  else {
+    const g = e.accelerationIncludingGravity; if (!g || g.x == null) return;
+    if (!motion.grav) motion.grav = [g.x, g.y, g.z];
+    const G = motion.grav; G[0] += (g.x - G[0]) * 0.1; G[1] += (g.y - G[1]) * 0.1; G[2] += (g.z - G[2]) * 0.1;
+    mx = g.x - G[0]; my = g.y - G[1]; mz = g.z - G[2];
+  }
+  const m = Math.hypot(mx, my, mz);
+  motion.ema += (m - motion.ema) * 0.2; motion.have = true;
+});
+function updateMotion(dt, active) {
+  const m = src.kind === 'demo' ? motion.sim : motion.ema;
+  const thr = [2.8, 2.0, 1.4][settings.strict] || 2.0;
+  if (m > thr) motion.meter += (m - thr) * dt * 0.9;
+  else motion.meter = Math.max(0, motion.meter - dt * 0.22);
+  if (!active) return false;
+  const bar = $('#stillBar'), wrap = $('#still');
+  bar.style.width = Math.min(100, motion.meter * 100).toFixed(0) + '%';
+  wrap.classList.toggle('warn', motion.meter > 0.5);
+  return motion.meter >= 1;
+}
+
+/* ---------- frame source (camera or demo room) ---------- */
+const video = $('#cam');
+const src = { kind: null, el: null, vw: 0, vh: 0, ready: false };
+let G = null;
+function geom() {
+  const vw = src.vw, vh = src.vh;
+  const s = Math.max(Wd / vw, Hd / vh);
+  const fv = src.kind === 'demo' ? PXR : (Math.max(vw, vh) / 2) / Math.tan(settings.fov * D2R / 2);
+  const k = PROC_LONG / Math.max(vw, vh);
+  G = { s, fv, fD: s * fv, k, fP: k * fv, pw: Math.round(vw * k), ph: Math.round(vh * k), sc: k / s };
+}
+function drawSource() {
+  const w = src.vw * G.s, h = src.vh * G.s;
+  ctx.drawImage(src.el, (Wd - w) / 2, (Hd - h) / 2, w, h);
+}
+let gray = null, grayStamp = -1, frameNo = 0;
+function grab() {
+  if (grayStamp === frameNo) return;
+  grayStamp = frameNo;
+  if (proc.width !== G.pw || proc.height !== G.ph || !gray) { proc.width = G.pw; proc.height = G.ph; gray = new Float32Array(G.pw * G.ph); }
+  pctx.drawImage(src.el, 0, 0, G.pw, G.ph);
+  const d = pctx.getImageData(0, 0, G.pw, G.ph).data;
+  for (let i = 0, j = 0; i < gray.length; i++, j += 4) gray[i] = 0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2];
+}
+// display ↔ world
+function project(d) {
+  const v = mulRT(ori.R, d);
+  if (v[2] > -0.08) return null;
+  return { x: G.fD * v[0] / -v[2] + Wd / 2, y: -G.fD * v[1] / -v[2] + Hd / 2 };
+}
+function dirFromProc(px, py) {
+  const x = (px - G.pw / 2) / G.fP, y = (py - G.ph / 2) / G.fP;
+  return norm3(mulR(ori.R, norm3([x, -y, -1])));
+}
+function screenUpAngle(d, P) {
+  const P2 = project(norm3([d[0], d[1], d[2] + 0.03]));
+  if (!P2) return 0;
+  return Math.atan2(P2.x - P.x, -(P2.y - P.y));
+}
+
+/* ---------- image analysis ---------- */
+function sobel(g, w, h) {
+  const gx = new Float32Array(w * h), gy = new Float32Array(w * h);
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+    const i = y * w + x;
+    const a = g[i-w-1], b = g[i-w], c = g[i-w+1], d = g[i-1], f = g[i+1], p = g[i+w-1], q = g[i+w], r = g[i+w+1];
+    gx[i] = (c + 2*f + r) - (a + 2*d + p);
+    gy[i] = (p + 2*q + r) - (a + 2*b + c);
+  }
+  return { gx, gy };
+}
+function regionVar(g, w, x0, y0, ww, hh) {
+  let s = 0, s2 = 0, n = ww * hh;
+  for (let y = y0; y < y0 + hh; y++) for (let x = x0; x < x0 + ww; x++) { const v = g[y * w + x]; s += v; s2 += v * v; }
+  const m = s / n; return s2 / n - m * m;
+}
+// Finds straight edges with a plain side (the "occluder") — window frames, door edges, sills, shelf sides
+function detect(g, w, h) {
+  const { gx, gy } = sobel(g, w, h);
+  const out = [], M = 28, TV = 70;
+  for (let cy = M; cy < h - M; cy += 5) for (let cx = M; cx < w - M; cx += 5) {
+    const cw = 1 - 0.45 * Math.hypot((cx - w/2) / (w/2), (cy - h/2) / (h/2));   // prefer frame centre
+    // vertical edge
+    let bs = 0, bc = cx;
+    for (let c = cx - 2; c <= cx + 2; c++) { let s = 0; for (let r = cy - 12; r <= cy + 12; r++) s += gx[r * w + c]; if (Math.abs(s) > Math.abs(bs)) { bs = s; bc = c; } }
+    if (Math.abs(bs) / 25 > TV) {
+      const sg = Math.sign(bs); let cons = 0;
+      for (let r = cy - 12; r <= cy + 12; r++) if (gx[r * w + bc] * sg > TV * 0.35) cons++;
+      if (cons >= 20) {
+        const L = regionVar(g, w, bc - 10, cy - 12, 7, 25), Rv = regionVar(g, w, bc + 4, cy - 12, 7, 25);
+        const lo = Math.min(L, Rv), hi = Math.max(L, Rv);
+        if (lo < 120 || lo < 0.5 * hi)
+          out.push({ x: bc, y: cy, o: 'v', s: L < Rv ? -1 : 1, score: (Math.abs(bs) / 25) * (cons / 25) * (1 + (hi - lo) / (hi + lo + 1)) * cw });
+      }
+    }
+    // horizontal edge (Pip peeks over it; plain side must be below)
+    let hs = 0, br = cy;
+    for (let r = cy - 2; r <= cy + 2; r++) { let s = 0; for (let c = cx - 12; c <= cx + 12; c++) s += gy[r * w + c]; if (Math.abs(s) > Math.abs(hs)) { hs = s; br = r; } }
+    if (Math.abs(hs) / 25 > TV) {
+      const sg = Math.sign(hs); let cons = 0;
+      for (let c = cx - 12; c <= cx + 12; c++) if (gy[br * w + c] * sg > TV * 0.35) cons++;
+      if (cons >= 20) {
+        const A = regionVar(g, w, cx - 12, br - 10, 25, 7), B = regionVar(g, w, cx - 12, br + 4, 25, 7);
+        if (B < 120 || B < 0.6 * A)
+          out.push({ x: cx, y: br, o: 'h', s: 1, score: (Math.abs(hs) / 25) * (cons / 25) * (1 + Math.max(0, A - B) / (A + B + 1)) * cw * 0.9 });
+      }
+    }
+  }
+  out.sort((a, b) => b.score - a.score);
+  const keep = [];
+  for (const c of out) { if (keep.every(k => Math.hypot(k.x - c.x, k.y - c.y) > 18)) keep.push(c); if (keep.length >= 5) break; }
+  return keep;
+}
+function makeTemplate(g, w, x, y) {
+  const t = new Float32Array(TS * TS); let s = 0, k = 0;
+  for (let j = -TH; j < TH; j++) for (let i = -TH; i < TH; i++, k++) { t[k] = g[(y + j) * w + x + i]; s += t[k]; }
+  const m = s / t.length; let n = 0;
+  for (k = 0; k < t.length; k++) { t[k] -= m; n += t[k] * t[k]; }
+  return { tpl: t, tn: Math.sqrt(n) };
+}
+// normalised cross-correlation search around (px,py) in the analysis frame
+function track(g, w, h, c, px, py, rad) {
+  const x0 = Math.max(TH, Math.round(px - rad)), x1 = Math.min(w - TH - 1, Math.round(px + rad));
+  const y0 = Math.max(TH, Math.round(py - rad)), y1 = Math.min(h - TH - 1, Math.round(py + rad));
+  if (x0 > x1 || y0 > y1) return null;
+  const N = TS * TS, T = c.tpl; let best = -2, bx = 0, by = 0;
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    let sw = 0, sw2 = 0, swt = 0, k = 0;
+    for (let j = -TH; j < TH; j++) {
+      const row = (y + j) * w + x - TH;
+      for (let i = 0; i < TS; i++, k++) { const v = g[row + i]; sw += v; sw2 += v * v; swt += v * T[k]; }
+    }
+    const vs = sw2 - sw * sw / N; if (vs < 1) continue;
+    const n = swt / (c.tn * Math.sqrt(vs));
+    if (n > best) { best = n; bx = x; by = y; }
+  }
+  return { x: bx, y: by, score: best };
+}
+
+/* ---------- demo room ---------- */
+const demo = { h: 0.3, p: 0, pano: null, frame: null, fctx: null, keys: {} };
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function buildPano() {
+  const PW = Math.round(TAU * PXR), PH = 896, H0 = PH / 2, CEIL = H0 - 330, FLOOR = H0 + 300;
+  const c = document.createElement('canvas'); c.width = PW; c.height = PH;
+  const g = c.getContext('2d'), R = rng(7);
+  const X = deg => deg / 360 * PW;
+  const rect = (x, y, w, h, f) => { g.fillStyle = f; g.fillRect(x, y, w, h); };
+  // ceiling + floor
+  let gr = g.createLinearGradient(0, 0, 0, CEIL); gr.addColorStop(0, '#d9d6cf'); gr.addColorStop(1, '#ecebe6'); rect(0, 0, PW, CEIL, gr);
+  gr = g.createLinearGradient(0, FLOOR, 0, PH); gr.addColorStop(0, '#7a5638'); gr.addColorStop(1, '#5e4029'); rect(0, FLOOR, PW, PH - FLOOR, gr);
+  g.strokeStyle = 'rgba(0,0,0,.18)'; g.lineWidth = 2;
+  for (let y = FLOOR + 22, k = 0; y < PH; y += 24 + k * 6, k++) { g.beginPath(); g.moveTo(0, y); g.lineTo(PW, y); g.stroke(); }
+  // walls with corner shading
+  const walls = ['#cdc5b6', '#bcc8bf', '#d2c6bb', '#bfc4cc'];
+  for (let i = 0; i < 4; i++) {
+    const x0 = X(i * 90), x1 = X(i * 90 + 90);
+    gr = g.createLinearGradient(x0, 0, x1, 0);
+    gr.addColorStop(0, 'rgba(0,0,0,.16)'); gr.addColorStop(0.12, 'rgba(0,0,0,0)'); gr.addColorStop(0.88, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,.16)');
+    rect(x0, CEIL, x1 - x0 + 1, FLOOR - CEIL, walls[i]); rect(x0, CEIL, x1 - x0 + 1, FLOOR - CEIL, gr);
+  }
+  rect(0, FLOOR - 18, PW, 18, '#f1efe9'); rect(0, CEIL, PW, 10, '#f4f2ee');
+  const curtain = (x, y, w, h, col) => {
+    rect(x, y, w, h, col);
+    for (let k = 0; k < w; k += 18) { const cg = g.createLinearGradient(x + k, 0, x + k + 18, 0); cg.addColorStop(0, 'rgba(0,0,0,.22)'); cg.addColorStop(.5, 'rgba(255,255,255,.08)'); cg.addColorStop(1, 'rgba(0,0,0,.22)'); rect(x + k, y, Math.min(18, w - k), h, cg); }
+  };
+  const windowAt = (cx, w, top, bot, curtL, curtR) => {
+    rect(cx - w / 2 - 14, top - 14, w + 28, bot - top + 28, '#f4f2ec');
+    gr = g.createLinearGradient(0, top, 0, bot); gr.addColorStop(0, '#8fbfe4'); gr.addColorStop(1, '#d8e8f2'); rect(cx - w / 2, top, w, bot - top, gr);
+    g.fillStyle = '#5f8a5b'; g.beginPath(); g.moveTo(cx - w / 2, bot);
+    for (let x = cx - w / 2; x <= cx + w / 2; x += 20) g.lineTo(x, bot - 40 - R() * 40);
+    g.lineTo(cx + w / 2, bot); g.fill();
+    rect(cx - 5, top, 10, bot - top, '#f4f2ec'); rect(cx - w / 2, (top + bot) / 2 - 5, w, 10, '#f4f2ec');
+    rect(cx - w / 2 - 34, bot + 14, w + 68, 14, '#f7f5f0'); rect(cx - w / 2 - 30, bot + 28, w + 60, 6, 'rgba(0,0,0,.15)');
+    rect(cx - w / 2 - 120, top - 46, w + 240, 6, '#3a3330');
+    if (curtL) curtain(cx - w / 2 - 110, top - 40, 96, curtL, '#7b4a69');
+    if (curtR) curtain(cx + w / 2 + 14, top - 40, 96, curtR, '#7b4a69');
+  };
+  // wall 0: big window, curtains, radiator
+  windowAt(X(45), 300, H0 - 220, H0 + 60, 380, 380);
+  rect(X(45) - 140, H0 + 140, 280, 100, '#eeece6');
+  for (let x = X(45) - 130; x < X(45) + 140; x += 20) rect(x, H0 + 146, 6, 88, 'rgba(0,0,0,.12)');
+  // wall 1: door, painting, switch
+  const dx = X(118);
+  rect(dx - 109, H0 - 214, 218, FLOOR - (H0 - 214), '#f4f2ec');
+  rect(dx - 95, H0 - 200, 190, FLOOR - (H0 - 200), '#a3764e');
+  g.strokeStyle = 'rgba(0,0,0,.25)'; g.lineWidth = 4;
+  g.strokeRect(dx - 70, H0 - 175, 140, 160); g.strokeRect(dx - 70, H0 + 15, 140, 200);
+  g.fillStyle = '#d6b45a'; g.beginPath(); g.arc(dx + 70, H0 + 10, 9, 0, TAU); g.fill();
+  rect(X(158) - 85, H0 - 175, 170, 125, '#3b2f2a'); rect(X(158) - 74, H0 - 164, 148, 103, '#e9e1cf');
+  for (let k = 0; k < 6; k++) { g.fillStyle = ['#d0583c', '#2f6f8f', '#e3b341', '#4c8c5a'][k % 4]; g.beginPath(); g.arc(X(158) - 50 + R() * 100, H0 - 140 + R() * 60, 10 + R() * 18, 0, TAU); g.fill(); }
+  rect(X(140) - 10, H0 - 30, 20, 30, '#f6f4ef');
+  // wall 2: bookshelf, clock, plant, rug
+  const bx = X(212), bw = 270, btop = H0 - 240;
+  rect(bx - bw / 2, btop, bw, FLOOR - btop, '#4a3426');
+  const rows = 5, rh = (FLOOR - btop - 20) / rows;
+  for (let r = 0; r < rows; r++) {
+    const y = btop + 10 + r * rh; rect(bx - bw / 2 + 10, y, bw - 20, rh - 10, '#2e2019');
+    let x = bx - bw / 2 + 14;
+    while (x < bx + bw / 2 - 30) { const w = 10 + R() * 14, hh = rh * (0.55 + R() * 0.35); g.fillStyle = ['#b8463a', '#2f5d7c', '#d8b24a', '#5b7b4c', '#e6e0d2', '#6d4a7a'][Math.floor(R() * 6)]; g.fillRect(x, y + rh - 10 - hh, w, hh); x += w + 2 + (R() < 0.1 ? 18 : 0); }
+  }
+  g.fillStyle = '#f6f4ef'; g.beginPath(); g.arc(X(252), H0 - 170, 40, 0, TAU); g.fill(); g.strokeStyle = '#2c2c2c'; g.lineWidth = 6; g.stroke();
+  g.lineWidth = 4; g.beginPath(); g.moveTo(X(252), H0 - 170); g.lineTo(X(252), H0 - 196); g.moveTo(X(252), H0 - 170); g.lineTo(X(252) + 18, H0 - 160); g.stroke();
+  g.fillStyle = '#b5603c'; g.beginPath(); g.moveTo(X(256) - 40, FLOOR - 110); g.lineTo(X(256) + 40, FLOOR - 110); g.lineTo(X(256) + 30, FLOOR - 4); g.lineTo(X(256) - 30, FLOOR - 4); g.fill();
+  for (let k = 0; k < 14; k++) { g.fillStyle = k % 2 ? '#3f7d4a' : '#58975b'; g.beginPath(); g.ellipse(X(256) + (R() - .5) * 90, FLOOR - 130 - R() * 120, 14, 40, (R() - .5) * 1.6, 0, TAU); g.fill(); }
+  g.fillStyle = 'rgba(140,60,50,.55)'; g.beginPath(); g.ellipse(X(200), FLOOR + 110, 260, 60, 0, 0, TAU); g.fill();
+  // wall 3: window with one curtain, lamp, sofa
+  windowAt(X(305), 220, H0 - 200, H0 + 40, 0, 560);
+  rect(X(282) - 3, H0 - 140, 6, FLOOR - (H0 - 140), '#2d2b28');
+  g.fillStyle = '#efe2c4'; g.beginPath(); g.moveTo(X(282) - 34, H0 - 140); g.lineTo(X(282) + 34, H0 - 140); g.lineTo(X(282) + 22, H0 - 200); g.lineTo(X(282) - 22, H0 - 200); g.fill();
+  const sx = X(328), sw = X(354) - sx;
+  rect(sx, H0 + 70, sw, 90, '#4d6b88'); rect(sx - 20, H0 + 130, sw + 40, FLOOR - (H0 + 130), '#43607b');
+  rect(sx + 10, H0 + 140, sw / 2 - 15, 50, '#5a7a98'); rect(sx + sw / 2 + 5, H0 + 140, sw / 2 - 15, 50, '#5a7a98');
+  rect(sx - 20, H0 + 110, 34, 120, '#3c566f'); rect(sx + sw - 14, H0 + 110, 34, 120, '#3c566f');
+  // grain so tracking has texture
+  const img = g.getImageData(0, 0, PW, PH), d = img.data, Rn = rng(3);
+  for (let i = 0; i < d.length; i += 4) { const n = (Rn() - 0.5) * 14; d[i] += n; d[i + 1] += n; d[i + 2] += n; }
+  g.putImageData(img, 0, 0);
+  demo.pano = c;
+}
+function sizeDemoFrame() {
+  const vw = Wd > Hd ? 640 : Math.round(640 * Wd / Hd), vh = Wd > Hd ? Math.round(640 * Hd / Wd) : 640;
+  if (!demo.frame) { demo.frame = document.createElement('canvas'); demo.fctx = demo.frame.getContext('2d'); }
+  demo.frame.width = vw; demo.frame.height = vh; src.vw = vw; src.vh = vh;
+}
+function updateDemo(dt) {
+  const K = demo.keys, sp = 1.4;
+  if (K.ArrowLeft) demo.h -= sp * dt; if (K.ArrowRight) demo.h += sp * dt;
+  if (K.ArrowUp) demo.p += sp * dt * 0.6; if (K.ArrowDown) demo.p -= sp * dt * 0.6;
+  motion.sim = K.w || K.W ? 3.6 : 0;
+  const PW = demo.pano.width, PH = demo.pano.height, vw = src.vw, vh = src.vh;
+  const pmax = (PH / 2 - vh / 2) / PXR - 0.01; demo.p = Math.max(-pmax, Math.min(pmax, demo.p));
+  demo.h = ((demo.h % TAU) + TAU) % TAU;
+  ori.R = rotMat(-demo.h / D2R, 90 + demo.p / D2R, 0);
+  let sx = demo.h * PXR - vw / 2; sx = ((sx % PW) + PW) % PW;
+  const sy = Math.round(PH / 2 - demo.p * PXR - vh / 2);
+  const w1 = Math.min(vw, PW - sx), f = demo.fctx;
+  f.drawImage(demo.pano, sx, sy, w1, vh, 0, 0, w1, vh);
+  if (w1 < vw) f.drawImage(demo.pano, 0, sy, vw - w1, vh, w1, 0, vw - w1, vh);
+}
+
+/* ---------- Pip ---------- */
+const C = { hood: '#36a86a', hoodDark: '#257a4b', skin: '#f2c9a5', scarf: '#ff8a3d', line: 'rgba(20,14,10,.55)' };
+function pipSprite(c, H, scared, blink) {
+  const w = H * 0.62;
+  c.lineWidth = Math.max(1, H * 0.025); c.strokeStyle = C.line;
+  // body
+  c.fillStyle = C.hood; c.beginPath(); c.roundRect ? c.roundRect(-w * 0.42, H * 0.02, w * 0.84, H * 0.46, w * 0.24) : c.rect(-w * 0.42, H * 0.02, w * 0.84, H * 0.46); c.fill(); c.stroke();
+  // hood with a floppy tip
+  c.beginPath(); c.moveTo(-w * 0.5, -H * 0.02);
+  c.quadraticCurveTo(-w * 0.58, -H * 0.4, w * 0.12, -H * 0.5);
+  c.quadraticCurveTo(w * 0.62, -H * 0.38, w * 0.5, -H * 0.02); c.closePath();
+  c.fillStyle = C.hood; c.fill(); c.stroke();
+  c.fillStyle = C.hoodDark; c.beginPath(); c.arc(w * 0.12, -H * 0.5, H * 0.045, 0, TAU); c.fill();
+  // face
+  c.fillStyle = C.skin; c.beginPath(); c.ellipse(0, -H * 0.17, w * 0.35, H * 0.18, 0, 0, TAU); c.fill(); c.stroke();
+  // eyes look toward -x (the open side)
+  const er = scared ? 1.35 : 1;
+  for (const ex of [-w * 0.15, w * 0.13]) {
+    c.fillStyle = '#fff'; c.beginPath(); c.ellipse(ex, -H * 0.2, w * 0.1 * er, (blink ? 0.012 : 0.075) * H * er, 0, 0, TAU); c.fill();
+    if (!blink) { c.fillStyle = '#1b1410'; c.beginPath(); c.arc(ex - w * 0.04, -H * 0.2, w * 0.05, 0, TAU); c.fill(); }
+  }
+  c.fillStyle = 'rgba(230,110,110,.45)'; c.beginPath(); c.arc(-w * 0.24, -H * 0.12, w * 0.06, 0, TAU); c.arc(w * 0.22, -H * 0.12, w * 0.06, 0, TAU); c.fill();
+  c.strokeStyle = '#6a3b2a'; c.beginPath();
+  if (scared) c.arc(-w * 0.02, -H * 0.08, w * 0.05, 0, TAU); else c.arc(-w * 0.02, -H * 0.1, w * 0.07, 0.2, Math.PI - 0.2);
+  c.stroke();
+  // scarf
+  c.fillStyle = C.scarf; c.strokeStyle = C.line;
+  c.beginPath(); c.roundRect ? c.roundRect(-w * 0.46, -H * 0.03, w * 0.92, H * 0.1, H * 0.04) : c.rect(-w * 0.46, -H * 0.03, w * 0.92, H * 0.1); c.fill(); c.stroke();
+  c.beginPath(); c.rect(w * 0.12, H * 0.05, w * 0.16, H * 0.18); c.fill(); c.stroke();
+}
+function drawPip(X, Y, ang, cand, H, peek, scared, blink) {
+  const w = H * 0.62;
+  ctx.save(); ctx.translate(X, Y); ctx.rotate(ang);
+  ctx.save();
+  ctx.beginPath();
+  if (cand.o === 'v') {
+    const s = cand.s;
+    if (s > 0) ctx.rect(-H * 3, -H * 3, H * 3, H * 6); else ctx.rect(0, -H * 3, H * 3, H * 6);
+    ctx.clip();
+    ctx.translate(s * w * (0.5 - peek), 0); if (s < 0) ctx.scale(-1, 1);
+    pipSprite(ctx, H, scared, blink);
+  } else {
+    ctx.rect(-H * 3, -H * 6, H * 6, H * 6); ctx.clip();
+    ctx.translate(0, H * (0.5 - peek));
+    pipSprite(ctx, H, scared, blink);
+  }
+  ctx.restore();
+  // little hands gripping the edge
+  ctx.fillStyle = C.skin; ctx.strokeStyle = C.line; ctx.lineWidth = Math.max(1, H * 0.025);
+  const hand = (x, y) => { ctx.beginPath(); ctx.arc(x, y, H * 0.06, 0, TAU); ctx.fill(); ctx.stroke(); };
+  if (peek > 0.15) {
+    if (cand.o === 'v') hand(-cand.s * H * 0.03, H * 0.04);
+    else { hand(-w * 0.3, -H * 0.02); hand(w * 0.3, -H * 0.02); }
+  }
+  ctx.restore();
+}
+function pipHitCentre(cand, H, peek) {
+  const w = H * 0.62;
+  return cand.o === 'v' ? { x: -cand.s * w * peek * 0.5, y: -H * 0.15 } : { x: 0, y: -H * peek * 0.5 };
+}
+function drawLogo() {
+  const c = $('#logo').getContext('2d');
+  c.clearRect(0, 0, 128, 128);
+  c.fillStyle = '#e9e4da'; c.fillRect(0, 0, 128, 128);
+  c.fillStyle = '#f7f5f0'; c.fillRect(64, 0, 22, 128);
+  c.fillStyle = '#9cc4e4'; c.fillRect(86, 0, 42, 128);
+  c.save(); c.beginPath(); c.rect(0, 0, 64, 128); c.clip(); c.translate(64 + 70 * 0.62 * 0.08, 70); pipSprite(c, 92, false, false); c.restore();
+  c.fillStyle = C.skin; c.strokeStyle = C.line; c.lineWidth = 2; c.beginPath(); c.arc(66, 74, 6, 0, TAU); c.fill(); c.stroke();
+}
+
+/* ---------- game state ---------- */
+let state = 'intro';
+const scan = { got: new Array(SECT).fill(false), cands: [], lastH: null, angVel: 0, lastCap: 0, stale: false };
+const game = { time: 60, score: 0, hits: 0, misses: 0, streak: 0, size: 44, fx: [], pip: null, countEnd: 0, endedBy: '' };
+
+function resetScan() {
+  scan.got.fill(false); scan.cands.length = 0; scan.lastH = null; scan.angVel = 0; scan.stale = false;
+}
+function scanStep(now, dt) {
+  const P = pose();
+  if (scan.lastH != null) {
+    let dh = P.heading - scan.lastH; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+    scan.angVel += (Math.abs(dh) / Math.max(dt, 1e-3) - scan.angVel) * 0.3;
+  }
+  scan.lastH = P.heading;
+  const upright = Math.abs(P.pitch) < 25 * D2R && Math.abs(P.roll) < 18 * D2R;
+  const slow = src.kind === 'demo' || scan.angVel < 75 * D2R;
+  const sec = Math.floor((((P.heading % TAU) + TAU) % TAU) / TAU * SECT) % SECT;
+  if (upright && slow && !scan.got[sec] && now - scan.lastCap > 120) {
+    grab();
+    const found = detect(gray, G.pw, G.ph);
+    for (const f of found) {
+      const t = makeTemplate(gray, G.pw, f.x, f.y);
+      if (t.tn < 40) continue;
+      const cand = { d: dirFromProc(f.x, f.y), o: f.o, s: f.s, score: f.score, tpl: t.tpl, tn: t.tn };
+      const dupe = scan.cands.findIndex(c => dot3(c.d, cand.d) > Math.cos(5 * D2R));
+      if (dupe < 0) scan.cands.push(cand); else if (scan.cands[dupe].score < cand.score) scan.cands[dupe] = cand;
+    }
+    scan.got[sec] = true; scan.lastCap = now;
+  }
+  const n = scan.got.filter(Boolean).length;
+  let title = 'Scan the room', text = 'Hold your phone upright and turn slowly in a full circle.';
+  if (!upright) { title = 'Hold it straight'; text = 'Keep the phone upright, like you are taking a photo.'; }
+  else if (!slow) { title = 'A bit slower'; text = 'Turn slowly so the camera picture stays sharp.'; }
+  setText('#hintTitle', title); setText('#hintText', text + `  ${n}/${SECT} · ${scan.cands.length} spots`);
+  $('#btnEarly').hidden = !(n >= 16 && scan.cands.length >= 6);
+  drawScanRing(P, upright);
+  if (n === SECT) finishScan();
+}
+function drawScanRing(P, upright) {
+  // horizon guide
+  ctx.save(); ctx.translate(Wd / 2, Hd / 2); ctx.rotate(-P.roll);
+  const off = P.pitch * G.fD;
+  ctx.strokeStyle = upright ? 'rgba(54,168,106,.9)' : 'rgba(255,138,61,.9)'; ctx.lineWidth = 2; ctx.setLineDash([8, 6]);
+  ctx.beginPath(); ctx.moveTo(-Wd, off); ctx.lineTo(-24, off); ctx.moveTo(24, off); ctx.lineTo(Wd, off); ctx.stroke();
+  ctx.setLineDash([]); ctx.restore();
+  ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(Wd / 2, Hd / 2, 10, 0, TAU); ctx.stroke();
+  // sector ring
+  const cx = Wd / 2, cy = Hd - 120 - (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sab')) || 0), r = 46;
+  ctx.fillStyle = 'rgba(12,18,15,.75)'; ctx.beginPath(); ctx.arc(cx, cy, r + 16, 0, TAU); ctx.fill();
+  for (let i = 0; i < SECT; i++) {
+    const a0 = i / SECT * TAU - Math.PI / 2, a1 = (i + 1) / SECT * TAU - Math.PI / 2 - 0.05;
+    ctx.strokeStyle = scan.got[i] ? C.hood : 'rgba(255,255,255,.18)'; ctx.lineWidth = 9;
+    ctx.beginPath(); ctx.arc(cx, cy, r, a0, a1); ctx.stroke();
+  }
+  const a = P.heading - Math.PI / 2;
+  ctx.fillStyle = C.scarf; ctx.beginPath();
+  ctx.moveTo(cx + Math.cos(a) * (r - 14), cy + Math.sin(a) * (r - 14));
+  ctx.lineTo(cx + Math.cos(a + 0.35) * 14, cy + Math.sin(a + 0.35) * 14);
+  ctx.lineTo(cx + Math.cos(a - 0.35) * 14, cy + Math.sin(a - 0.35) * 14); ctx.fill();
+  ctx.fillStyle = '#edf2ec'; ctx.font = '700 13px "JetBrains Mono", monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(Math.round(scan.got.filter(Boolean).length / SECT * 100) + '%', cx, cy);
+}
+function finishScan() {
+  if (scan.cands.length < 4) addFallbackSpots();
+  state = 'ready'; show('ready');
+  setText('#readyTitle', 'Room learned');
+  setText('#readyText', `Pip found ${scan.cands.length} places to hide. Stay on this spot, keep the phone upright, and get ready.`);
+}
+function addFallbackSpots() {
+  // Plain rooms: give Pip a few open spots (no cover) around eye level
+  for (let i = 0; i < 6; i++) {
+    const h = i / 6 * TAU + 0.3, p = (Math.random() - 0.5) * 0.3;
+    scan.cands.push({ d: [Math.sin(h) * Math.cos(p), Math.cos(h) * Math.cos(p), Math.sin(p)], o: 'v', s: Math.random() < .5 ? -1 : 1, score: 0, tpl: null, tn: 0 });
+  }
+}
+
+function startRound() {
+  if (scan.stale) { setText('#readyText', 'You moved away from your spot, so the room needs a fresh scan.'); beginScan(); return; }
+  game.time = settings.secs; game.score = 0; game.hits = 0; game.misses = 0; game.streak = 0;
+  game.size = 44 * Math.max(0.85, Math.min(1.4, Math.min(Wd, Hd) / 390)); game.fx.length = 0;
+  game.pip = { cand: null, hiddenUntil: 0, recent: [] };
+  motion.meter = 0;
+  hideSheets(); $('#hud').hidden = false; $('#still').hidden = false; $('#hint').hidden = true;
+  updateHud(true);
+  state = 'countdown'; game.countEnd = performance.now() + 3000; $('#count').hidden = false;
+}
+function spawn(now, minAway) {
+  const p = game.pip, fw = pose().fw;
+  const pool = scan.cands.filter(c => !p.recent.includes(c));
+  let choices = pool.filter(c => Math.acos(Math.max(-1, Math.min(1, dot3(c.d, fw)))) > minAway);
+  if (!choices.length) choices = pool.length ? pool : scan.cands;
+  // weight by spot quality, with a little randomness
+  let total = 0; const w = choices.map(c => { const v = 1 + Math.sqrt(Math.max(0, c.score)); total += v; return v; });
+  let r = Math.random() * total, pick = choices[0];
+  for (let i = 0; i < choices.length; i++) { r -= w[i]; if (r <= 0) { pick = choices[i]; break; } }
+  p.cand = pick; p.recent.push(pick); if (p.recent.length > Math.min(4, scan.cands.length - 1)) p.recent.shift();
+  p.corr = { x: 0, y: 0 }; p.lock = 0; p.appear = now; p.onScreen = false; p.screen = null;
+  p.duckAt = now + 2500 + Math.random() * 3500; p.blinkAt = now + 1500 + Math.random() * 2500; p.scared = false;
+}
+function playStep(now, dt) {
+  game.time -= dt;
+  if (game.time <= 0) { game.time = 0; return endGame('time'); }
+  const p = game.pip;
+  if (now >= p.hiddenUntil && !p.cand) spawn(now, 50 * D2R);
+  p.onScreen = false;
+  if (p.cand && now >= p.hiddenUntil) {
+    const c = p.cand, P = project(c.d);
+    if (P && P.x > -100 && P.x < Wd + 100 && P.y > -100 && P.y < Hd + 100) {
+      if (c.tpl) {
+        grab();
+        const qx = (P.x + p.corr.x - Wd / 2) * G.sc + G.pw / 2, qy = (P.y + p.corr.y - Hd / 2) * G.sc + G.ph / 2;
+        const m = track(gray, G.pw, G.ph, c, qx, qy, 12);
+        if (m && m.score > 0.6) {
+          const mx = (m.x - G.pw / 2) / G.sc + Wd / 2, my = (m.y - G.ph / 2) / G.sc + Hd / 2;
+          p.corr.x += (mx - P.x - p.corr.x) * 0.5; p.corr.y += (my - P.y - p.corr.y) * 0.5; p.lock = Math.min(1, p.lock + dt * 4);
+        } else p.lock = Math.max(0, p.lock - dt * 2);
+      }
+      const X = P.x + p.corr.x, Y = P.y + p.corr.y, ang = screenUpAngle(c.d, P);
+      // peek amount: ease in, gentle bob, occasional duck
+      const H = game.size;
+      let peek = (c.o === 'v' ? 0.4 : 0.44) + 0.07 * Math.sin(now / 430);
+      peek *= Math.min(1, (now - p.appear) / 450);
+      if (now > p.duckAt) { const u = (now - p.duckAt) / 800; if (u >= 1) p.duckAt = now + 3500 + Math.random() * 4000; else peek *= 1 - 0.8 * Math.sin(u * Math.PI); }
+      const blink = now > p.blinkAt && now < p.blinkAt + 130; if (now > p.blinkAt + 130) p.blinkAt = now + 2000 + Math.random() * 3000;
+      p.screen = { x: X, y: Y, ang, H, peek };
+      if (X > -H && X < Wd + H && Y > -H && Y < Hd + H) { p.onScreen = true; p.seenOnce = true; drawPip(X, Y, ang, c, H, peek, false, blink); }
+    }
+    if (!p.onScreen && now - p.appear > 12000) drawHintArrow(c.d, now);
+  }
+  drawFx(now);
+  updateHud(false);
+}
+function drawHintArrow(d, now) {
+  const v = mulRT(ori.R, d);
+  let ax = v[0], ay = -v[1]; const l = Math.hypot(ax, ay) || 1; ax /= l; ay /= l;
+  const pulse = 0.35 + 0.35 * Math.sin(now / 250);
+  const m = 34, hx = Wd / 2 - m, hy = Hd / 2 - m - 50;
+  const t = Math.min(hx / Math.abs(ax || 1e-6), hy / Math.abs(ay || 1e-6));
+  const x = Wd / 2 + ax * t, y = Hd / 2 + ay * t;
+  ctx.save(); ctx.translate(x, y); ctx.rotate(Math.atan2(ay, ax));
+  ctx.globalAlpha = pulse; ctx.strokeStyle = C.scarf; ctx.lineWidth = 4; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-8, -12); ctx.lineTo(6, 0); ctx.lineTo(-8, 12); ctx.stroke();
+  ctx.restore();
+}
+function onTap(x, y) {
+  if (state !== 'play') return;
+  const p = game.pip, now = performance.now();
+  if (!p.cand || now < p.hiddenUntil) return;
+  if (p.onScreen && p.screen) {
+    const S = p.screen, dx = x - S.x, dy = y - S.y, ca = Math.cos(-S.ang), sa = Math.sin(-S.ang);
+    const lx = dx * ca - dy * sa, ly = dx * sa + dy * ca;
+    const hc = pipHitCentre(p.cand, S.H, Math.max(0.2, S.peek)), r = Math.max(18, S.H * 0.55);
+    if (Math.hypot(lx - hc.x, ly - hc.y) <= r) return hit(now, S);
+  }
+  miss(now, x, y);
+}
+function hit(now, S) {
+  const p = game.pip, secs = (now - p.appear) / 1000;
+  const bonus = Math.max(0, Math.round(150 - secs * 15));
+  game.streak++; const pts = 100 + bonus + (game.streak - 1) * 25;
+  game.score += pts; game.hits++;
+  game.size = Math.max(24, game.size * 0.93);
+  game.fx.push({ k: 'hit', x: S.x, y: S.y, t0: now, text: '+' + pts + (game.streak > 1 ? '  ×' + game.streak : '') });
+  p.cand = null; p.hiddenUntil = now + 450;
+  blip(880, 0.08); setTimeout(() => blip(1320, 0.1), 70); buzz(25);
+}
+function miss(now, x, y) {
+  const p = game.pip;
+  game.misses++; game.streak = 0;
+  if (p.onScreen && p.screen) game.fx.push({ k: 'flee', x: p.screen.x, y: p.screen.y, ang: p.screen.ang, cand: p.cand, H: p.screen.H, t0: now });
+  game.fx.push({ k: 'miss', x, y, t0: now, text: p.onScreen ? 'Missed! Pip ran off' : 'Pip heard that and moved' });
+  p.cand = null; p.hiddenUntil = now + 600;
+  blip(220, 0.12, 'sawtooth'); buzz([40, 30, 40]);
+}
+function drawFx(now) {
+  game.fx = game.fx.filter(f => now - f.t0 < 1100);
+  for (const f of game.fx) {
+    const u = (now - f.t0) / 1100;
+    ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    if (f.k === 'hit') {
+      for (let i = 0; i < 10; i++) {
+        const a = i / 10 * TAU, r = 10 + u * 60;
+        ctx.fillStyle = i % 2 ? C.scarf : '#ffe27a'; ctx.globalAlpha = 1 - u;
+        ctx.beginPath(); ctx.arc(f.x + Math.cos(a) * r, f.y + Math.sin(a) * r, 4 * (1 - u) + 1, 0, TAU); ctx.fill();
+      }
+      ctx.globalAlpha = 1 - u * u; ctx.font = '800 26px "Bricolage Grotesque", sans-serif';
+      ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(0,0,0,.55)'; ctx.strokeText(f.text, f.x, f.y - 30 - u * 40);
+      ctx.fillStyle = '#fff'; ctx.fillText(f.text, f.x, f.y - 30 - u * 40);
+    } else if (f.k === 'flee') {
+      if (u < 0.35) { const peek = 0.5 * (1 - u / 0.35); drawPip(f.x, f.y, f.ang, f.cand, f.H, peek, true, false); }
+      ctx.globalAlpha = 1 - u; ctx.fillStyle = 'rgba(240,240,240,.8)';
+      for (let i = 0; i < 6; i++) { ctx.beginPath(); ctx.arc(f.x + (i - 2.5) * 7, f.y - u * 30 - (i % 2) * 6, 5 + u * 8, 0, TAU); ctx.fill(); }
+    } else {
+      ctx.globalAlpha = 1 - u; ctx.strokeStyle = '#ff5a5a'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(f.x, f.y, 8 + u * 26, 0, TAU); ctx.stroke();
+      ctx.font = '800 17px "Bricolage Grotesque", sans-serif'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,.55)';
+      const ty = f.y + (f.y > Hd - 120 ? -44 : 44);
+      ctx.strokeText(f.text, Math.min(Wd - 110, Math.max(110, f.x)), ty); ctx.fillStyle = '#fff'; ctx.fillText(f.text, Math.min(Wd - 110, Math.max(110, f.x)), ty);
+    }
+    ctx.restore();
+  }
+}
+let hudCache = {};
+function updateHud(force) {
+  const t = Math.ceil(game.time);
+  if (force || hudCache.t !== t) { setText('#hTime', t); $('#hTimeChip').classList.toggle('low', t <= 10); hudCache.t = t; }
+  if (force || hudCache.s !== game.score) { setText('#hScore', game.score); hudCache.s = game.score; }
+  if (force || hudCache.h !== game.hits) { setText('#hHits', game.hits); hudCache.h = game.hits; }
+}
+function endGame(reason) {
+  state = 'over'; game.endedBy = reason;
+  $('#hud').hidden = true; $('#still').hidden = true; $('#count').hidden = true;
+  const dq = reason === 'moved';
+  if (dq) scan.stale = true;
+  if (!dq && game.score > best) { best = game.score; try { localStorage.setItem('piphunt.best', best); } catch (e) {} }
+  const r = $('#overReason'); r.textContent = dq ? 'Disqualified · you left your spot' : "Time's up"; r.classList.toggle('dq', dq);
+  setText('#overTitle', dq ? 'You wandered off' : game.hits === 0 ? 'Pip stayed hidden' : `You caught Pip ${game.hits} time${game.hits === 1 ? '' : 's'}`);
+  setText('#oScore', dq ? 0 : game.score);
+  const taps = game.hits + game.misses; setText('#oAcc', taps ? Math.round(game.hits / taps * 100) + '%' : '–');
+  setText('#oBest', best);
+  setText('#overNote', dq ? 'Your score does not count. Stand in one place and only turn on the spot.' : game.misses ? `${game.misses} miss${game.misses === 1 ? '' : 'es'} scared him off.` : 'No misses. Pip is impressed.');
+  setText('#btnAgain', dq ? 'Scan again' : 'Play again');
+  show('over');
+  if (dq) { blip(160, 0.3, 'square'); buzz([120, 60, 120]); }
+}
+
+/* ---------- loop ---------- */
+let last = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.05, (now - last) / 1000); last = now; frameNo++;
+  if (src.kind === 'camera' && video.videoWidth) { src.vw = video.videoWidth; src.vh = video.videoHeight; }
+  if (!src.ready || !src.vw) { ctx.fillStyle = '#0e1411'; ctx.fillRect(0, 0, Wd, Hd); return; }
+  const wrongWay = src.kind === 'camera' && Wd > Hd;
+  $('#rotate').hidden = !wrongWay;
+  if (src.kind === 'demo') updateDemo(dt);
+  geom(); drawSource();
+  const active = state === 'scan' || state === 'ready' || state === 'countdown' || state === 'play';
+  if (updateMotion(dt, active) && active) { endGame('moved'); return; }
+  if (state === 'over' && motion.meter >= 1) { scan.stale = true; setText('#btnAgain', 'Scan again'); }
+  if (wrongWay) return;
+  if (state === 'scan') scanStep(now, dt);
+  else if (state === 'countdown') {
+    const left = Math.ceil((game.countEnd - now) / 1000);
+    setText('#count', left > 0 ? left : 'Go!');
+    if (now >= game.countEnd + 400) { $('#count').hidden = true; state = 'play'; }
+  } else if (state === 'play') playStep(now, dt);
+}
+
+/* ---------- UI helpers ---------- */
+function setText(sel, v) { const el = $(sel); const s = String(v); if (el.textContent !== s) el.textContent = s; }
+function hideSheets() { for (const id of ['intro', 'ready', 'over']) $('#' + id).hidden = true; }
+function show(id) { hideSheets(); $('#' + id).hidden = false; }
+function beginScan() {
+  resetScan(); motion.meter = 0;
+  hideSheets(); $('#hud').hidden = true; $('#hint').hidden = false; $('#still').hidden = false; $('#count').hidden = true;
+  state = 'scan';
+}
+let actx = null;
+function blip(f, d, type) {
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = type || 'triangle'; o.frequency.value = f; g.gain.setValueAtTime(0.18, actx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + d);
+    o.connect(g).connect(actx.destination); o.start(); o.stop(actx.currentTime + d + 0.02);
+  } catch (e) {}
+}
+function buzz(p) { try { navigator.vibrate && navigator.vibrate(p); } catch (e) {} }
+async function wake() { try { await navigator.wakeLock?.request('screen'); } catch (e) {} }
+function showError(msg) { const n = $('#errNote'); n.textContent = msg; n.hidden = false; n.classList.add('warn'); }
+
+async function startCamera() {
+  $('#errNote').hidden = true;
+  blip(660, 0.05);
+  try {
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      const r = await DeviceOrientationEvent.requestPermission();
+      if (r !== 'granted') return showError('Pip Hunt needs motion access to know which way you are facing. Allow it and try again.');
+    }
+    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+      try { await DeviceMotionEvent.requestPermission(); } catch (e) {}
+    }
+  } catch (e) { return showError('Motion access was refused. Allow it in the browser settings and reload.'); }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return showError('This browser cannot open the camera here. Open the page over https in Safari or Chrome.');
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } } });
+  } catch (e) { return showError('The camera did not open (' + (e.name || 'error') + '). Allow camera access and try again.'); }
+  video.srcObject = stream;
+  try { await video.play(); } catch (e) {}
+  src.kind = 'camera'; src.el = video;
+  const t0 = performance.now();
+  while ((!video.videoWidth || !ori.have) && performance.now() - t0 < 2500) await new Promise(r => setTimeout(r, 50));
+  if (!video.videoWidth) return showError('The camera opened but sent no picture. Close other apps using it and try again.');
+  if (!ori.have) { stream.getTracks().forEach(t => t.stop()); src.kind = null; return showError('No gyroscope found on this device. Try the demo room instead.'); }
+  src.vw = video.videoWidth; src.vh = video.videoHeight; src.ready = true;
+  wake(); beginScan();
+}
+function startDemo() {
+  blip(660, 0.05);
+  if (!demo.pano) buildPano();
+  src.kind = 'demo'; sizeDemoFrame(); src.el = demo.frame; src.ready = true;
+  $('#hintText').textContent = '';
+  beginScan();
+  setText('#hintTitle', 'Demo room');
+}
+
+/* ---------- input ---------- */
+let drag = null;
+cv.addEventListener('pointerdown', e => {
+  if (src.kind === 'camera') { onTap(e.clientX, e.clientY); return; }
+  drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, moved: false };
+  cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener('pointermove', e => {
+  if (!drag || src.kind !== 'demo' || !G) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY;
+  if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 6) drag.moved = true;
+  demo.h -= dx / G.fD; demo.p += dy / G.fD;
+});
+cv.addEventListener('pointerup', e => { if (drag && !drag.moved) onTap(e.clientX, e.clientY); drag = null; });
+cv.addEventListener('pointercancel', () => { drag = null; });
+window.addEventListener('keydown', e => { demo.keys[e.key] = true; if (e.key.startsWith('Arrow')) e.preventDefault(); });
+window.addEventListener('keyup', e => { demo.keys[e.key] = false; });
+
+$('#btnCam').addEventListener('click', startCamera);
+$('#btnDemo').addEventListener('click', startDemo);
+$('#btnEarly').addEventListener('click', finishScan);
+$('#btnGo').addEventListener('click', () => { blip(660, 0.05); startRound(); });
+$('#btnRescan').addEventListener('click', beginScan);
+$('#btnAgain').addEventListener('click', () => { if (scan.stale) beginScan(); else startRound(); });
+$('#btnMenu').addEventListener('click', () => { state = 'intro'; $('#hint').hidden = true; $('#still').hidden = true; show('intro'); });
+
+const fov = $('#fov'), strict = $('#strict'), secs = $('#secs');
+fov.value = settings.fov; strict.value = settings.strict; secs.value = settings.secs; $('#fovOut').textContent = settings.fov + '°';
+fov.addEventListener('input', () => { settings.fov = +fov.value; $('#fovOut').textContent = fov.value + '°'; saveSettings(); });
+strict.addEventListener('change', () => { settings.strict = +strict.value; saveSettings(); });
+secs.addEventListener('change', () => { settings.secs = +secs.value; saveSettings(); });
+
+if (!window.isSecureContext) $('#secureNote').hidden = false;
+window.addEventListener('resize', resize);
+resize(); drawLogo();
+requestAnimationFrame(frame);
+// test hook
+window.__pip = { scan, game, demo, get state() { return state; } };
+</script>
+</body>
+</html>
